@@ -31,7 +31,10 @@ impl bindgen::callbacks::ParseCallbacks for ParseCallbacks {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn main() {
+    println!("cargo:rustc-link-lib=udev");
+
     // Invalidate the built crate whenever the wrapper changes
     println!("cargo:rerun-if-changed=wrapper.h");
 
@@ -50,4 +53,15 @@ fn main() {
     bindings
         .write_to_file(out_path.join("bindings.rs"))
         .expect("Couldn't write bindings!");
+
+    cc::Build::new()
+        .file("xwiimote/lib/core.c")
+        .file("xwiimote/lib/monitor.c")
+        .define("XWII__EXPORT", r#"__attribute__((visibility("default")))"#)
+        .compile("xwiimote");
+}
+
+#[cfg(not(target_os = "linux"))]
+fn main() {
+    panic!("xwiimote only works on Linux");
 }

@@ -77,3 +77,13 @@ impl Drop for Monitor {
         unsafe { xwiimote_sys::monitor_unref(self.inner) };
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Monitor;
+
+    #[test]
+    fn create_monitor() {
+        Monitor::enumerate();
+    }
+}

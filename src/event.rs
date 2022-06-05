@@ -1,4 +1,4 @@
-enum Key {
+pub enum Key {
     // Wiimote // todo: note that the power button is not reported
     /// Left directional pad button.
     Left,
@@ -66,7 +66,7 @@ enum Key {
     LowestFretBar,
 }
 
-enum KeyState {
+pub enum KeyState {
     Up = 0,
     Down,
     AutoRepeat,

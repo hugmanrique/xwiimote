@@ -34,7 +34,16 @@ impl From<&Path> for Address {
 }
 
 // todo
-enum DeviceType {}
+enum Interface {
+    Core,
+    Accelerometer,
+    Ir,
+    MotionPlus,
+    Nunchuk,
+    ClassicController,
+    BalanceBoard,
+    ProController,
+}
 
 /// Describes the communication with a device.
 struct Device(*mut iface);
@@ -130,8 +139,8 @@ impl Device {
 
 impl Drop for Device {
     fn drop(&mut self) {
-        // Close all interfaces, never fails
-        unsafe { xwiimote_sys::iface_close(self.0, raw::c_uint::MAX) };
+        // Also drops all open interfaces.
+        unsafe { xwiimote_sys::iface_unref(self.0) };
     }
 }
 
