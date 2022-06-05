@@ -1,0 +1,20 @@
+[package]
+name = "xwiimote-sys"
+version = "0.1.1"
+authors = ["David Herrmann <dh.herrmann@gmail.com>", "Hugo Manrique <cargo@hugmanrique.me>"]
+edition = "2021"
+description = "FFI bindings to the xwiimote user-space library"
+license = "MIT"
+homepage = "https://github.com/hugmanrique/xwiimote/xwiimote-sys/"
+documentation = "https://docs.rs/xwiimote-sys/"
+repository = "https://github.com/hugmanrique/xwiimote/"
+readme = "README.md"
+keywords = ["xwiimote", "bindings", "wrapper"]
+categories = ["external-ffi-bindings"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+
+[build-dependencies]
+bindgen = "0.59.2"

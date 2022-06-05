@@ -1,0 +1,3 @@
+[submodule "xwiimote-sys/xwiimote"]
+	path = xwiimote-sys/xwiimote
+	url = git@github.com:dvdhrm/xwiimote.git
