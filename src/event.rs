@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 pub enum Key {
     // Wiimote // todo: note that the power button is not reported
     /// Left directional pad button.
@@ -73,8 +75,17 @@ pub enum KeyState {
 }
 
 pub enum Event {
-    Key { key: Key, state: KeyState },
-    AbsMotion { x: u32, y: u32, z: u32 },
+    Key {
+        time: Instant,
+        key: Key,
+        state: KeyState,
+    },
+    AbsMotion {
+        time: Instant,
+        x: u32,
+        y: u32,
+        z: u32,
+    },
 }
 
 /*pub struct Event {

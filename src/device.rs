@@ -1,14 +1,28 @@
-use crate::monitor::Monitor;
 use crate::to_owned_str;
+use bitflags::bitflags;
+use std::error::Error;
+use std::fmt::Formatter;
 use std::os::raw;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::{io, ptr};
+use std::{fmt, ptr};
 use xwiimote_sys::iface;
 
-type Result<T> = io::Result<T>;
+#[derive(Debug, Clone)]
+pub struct DeviceError(i32);
+
+impl fmt::Display for DeviceError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "device error: {}", self.0)
+    }
+}
+
+impl Error for DeviceError {}
+
+type DeviceResult<T> = Result<T, DeviceError>;
 
 /// A Wii Remote device address.
+#[derive(Clone, Debug)]
 pub struct Address(PathBuf);
 
 impl From<PathBuf> for Address {
@@ -33,32 +47,144 @@ impl From<&Path> for Address {
     }
 }
 
-// todo
-enum Interface {
-    Core,
-    Accelerometer,
-    Ir,
-    MotionPlus,
-    Nunchuk,
-    ClassicController,
-    BalanceBoard,
-    ProController,
+bitflags! {
+    /// Represents the channels that can be opened on a `Device`.
+    pub struct Channels: raw::c_uint {
+        // todo: improve docs
+        /// Primary channel.
+        const CORE = 0x1;
+        /// Accelerometer channel.
+        const ACCELEROMETER = 0x2;
+        /// IR camera channel.
+        const IR = 0x4;
+        /// MotionPlus extension channel.
+        const MOTION_PLUS = 0x100;
+        /// Nunchuk extension channel.
+        const NUNCHUK = 0x200;
+        /// Classic controller channel.
+        const CLASSIC_CONTROLLER = 0x400;
+        /// Balance board channel.
+        const BALANCE_BOARD = 0x800;
+        /// ProController channel.
+        const PRO_CONTROLLER = 0x1000;
+        /// Drums channel.
+        const DRUMS = 0x2000;
+        /// Guitar channel.
+        const GUITAR = 0x4000;
+    }
 }
 
 /// Describes the communication with a device.
-struct Device(*mut iface);
+struct Device {
+    handle: *mut iface,
+    // Have we opened the core channel in writable mode?
+    // We need to keep track of this because some operations
+    // like `rumble(bool)` require this channel.
+    core_open: bool,
+}
 
 impl Device {
     /// Opens the Wii Remote at the given address.
-    pub fn open(address: &Address) -> Result<Self> {
-        let mut inner = ptr::null_mut();
+    pub fn new(address: &Address) -> DeviceResult<Self> {
+        let mut handle = ptr::null_mut();
         let path = address.0.as_os_str().as_bytes().as_ptr() as *const raw::c_char;
 
-        let err_code = unsafe { xwiimote_sys::iface_new(&mut inner, path) };
+        let err_code = unsafe { xwiimote_sys::iface_new(&mut handle, path) };
         if err_code == 0 {
-            Ok(Device(inner))
+            Ok(Device {
+                handle,
+                core_open: false,
+            })
         } else {
-            Err(iface_error(err_code))
+            Err(DeviceError(err_code))
+        }
+    }
+
+    // Channels (these are called interfaces in xwiimote)
+
+    /// Opens the given channels on the device.
+    ///
+    /// If a given channel is already open, it is ignored. If any channel
+    /// fails to open, this function still tries to open the remaining
+    /// requested channels and then returns the error.
+    ///
+    /// A channel may be closed automatically if the e.g. an extension
+    /// is unplugged or on error conditions.
+    // todo: return the channels that failed.
+    // todo: document that an event is emitted if a channel is closed.
+    pub fn open(&mut self, channels: Channels, writable: bool) -> DeviceResult<()> {
+        let interfaces = channels.bits | (writable as raw::c_uint) << 16;
+        let err_code = unsafe { xwiimote_sys::iface_open(self.handle, interfaces) };
+        if err_code == 0 {
+            if channels.contains(Channels::CORE) {
+                self.core_open = true;
+            }
+            Ok(())
+        } else {
+            Err(DeviceError(err_code))
+        }
+    }
+
+    /// Closes the given channels on the device.
+    ///
+    /// If a channel is already closed, it is ignored.
+    pub fn close(&mut self, channels: Channels) {
+        if channels.contains(Channels::CORE) {
+            self.core_open = false;
+        }
+        unsafe { xwiimote_sys::iface_close(self.handle, channels.bits) }
+    }
+
+    /// Returns the channels that are currently open.
+    pub fn all_open(&self) -> Channels {
+        Channels::from_bits(unsafe { xwiimote_sys::iface_available(self.handle) }).unwrap()
+    }
+
+    /// Returns the channels that can be opened on the device.
+    ///
+    /// A channel can become available if an extension is plugged
+    /// to the device. Similarly, it becomes unavailable when the
+    /// extension is disconnected.
+    pub fn available(&self) -> Channels {
+        Channels::from_bits(unsafe { xwiimote_sys::iface_available(self.handle) }).unwrap()
+    }
+
+    /// Watch the device for hot-plug events.
+    pub fn watch(&mut self, enabled: bool) -> DeviceResult<()> {
+        let err_code = unsafe { xwiimote_sys::iface_watch(self.handle, enabled) };
+        if err_code == 0 {
+            Ok(())
+        } else {
+            Err(DeviceError(err_code))
+        }
+    }
+
+    // Actions on "main" channel (it isn't a channel per se)
+
+    /// Reads the state of the LED light.
+    ///
+    /// # Returns
+    /// On success, `true` if the light is enabled and `false`
+    /// if disabled. Otherwise, an error is returned.
+    pub fn led(&self, light: Led) -> DeviceResult<bool> {
+        let mut enabled = false;
+        let err_code =
+            unsafe { xwiimote_sys::iface_get_led(self.handle, light as raw::c_uint, &mut enabled) };
+        if err_code == 0 {
+            Ok(enabled)
+        } else {
+            Err(DeviceError(err_code))
+        }
+    }
+
+    /// Sets the state of the LED light.
+    pub fn set_led(&mut self, light: Led, enabled: bool) -> DeviceResult<()> {
+        let err_code =
+            unsafe { xwiimote_sys::iface_set_led(self.handle, light as raw::c_uint, enabled) };
+        if err_code == 0 {
+            Ok(())
+        } else {
+            Err(DeviceError(err_code))
         }
     }
 
@@ -67,70 +193,51 @@ impl Device {
     /// # Returns
     /// The battery level as a percentage from 0 to 100, where
     /// 100 means the battery is full.
-    pub fn battery(&self) -> Result<u8> {
+    pub fn battery(&self) -> DeviceResult<u8> {
         let mut capacity = 0;
-        let err_code = unsafe { xwiimote_sys::iface_get_battery(self.0, &mut capacity) };
+        let err_code = unsafe { xwiimote_sys::iface_get_battery(self.handle, &mut capacity) };
         if err_code == 0 {
             Ok(capacity)
         } else {
-            Err(iface_error(err_code))
+            Err(DeviceError(err_code))
         }
     }
 
     /// Reads the device type identifier.
-    pub fn kind(&self) -> Result<String> {
+    pub fn kind(&self) -> DeviceResult<String> {
         let mut kind = ptr::null_mut();
-        let err_code = unsafe { xwiimote_sys::iface_get_devtype(self.0, &mut kind) };
+        let err_code = unsafe { xwiimote_sys::iface_get_devtype(self.handle, &mut kind) };
         if err_code == 0 {
             Ok(to_owned_str(kind))
         } else {
-            Err(iface_error(err_code))
+            Err(DeviceError(err_code))
         }
     }
 
     /// Reads the extension type identifier.
-    pub fn extension(&self) -> Result<String> {
+    pub fn extension(&self) -> DeviceResult<String> {
         let mut ext_type = ptr::null_mut();
-        let err_code = unsafe { xwiimote_sys::iface_get_extension(self.0, &mut ext_type) };
+        let err_code = unsafe { xwiimote_sys::iface_get_extension(self.handle, &mut ext_type) };
         if err_code == 0 {
             Ok(to_owned_str(ext_type))
         } else {
-            Err(iface_error(err_code))
-        }
-    }
-
-    /// Reads the state of the LED light.
-    ///
-    /// # Returns
-    /// On success, `true` if the light is enabled and `false`
-    /// if disabled. Otherwise, an error is returned.
-    pub fn led(&self, light: Led) -> Result<bool> {
-        let mut enabled = false;
-        let err_code = unsafe { xwiimote_sys::iface_get_led(self.0, light.raw(), &mut enabled) };
-        if err_code == 0 {
-            Ok(enabled)
-        } else {
-            Err(iface_error(err_code))
-        }
-    }
-
-    /// Sets the state of the LED light.
-    pub fn set_led(&self, light: Led, enabled: bool) -> Result<()> {
-        let err_code = unsafe { xwiimote_sys::iface_set_led(self.0, light.raw(), enabled) };
-        if err_code == 0 {
-            Ok(())
-        } else {
-            Err(iface_error(err_code))
+            Err(DeviceError(err_code))
         }
     }
 
     /// Toggles the rumble motor.
-    pub fn rumble(&self, enable: bool) -> Result<()> {
-        let err_code = unsafe { xwiimote_sys::iface_rumble(self.0, enable) };
+    ///
+    /// If the core channel is closed, it is opened in writable
+    /// mode.
+    pub fn rumble(&mut self, enable: bool) -> DeviceResult<()> {
+        if !self.core_open {
+            self.open(Channels::CORE, true)?;
+        }
+        let err_code = unsafe { xwiimote_sys::iface_rumble(self.handle, enable) };
         if err_code == 0 {
             Ok(())
         } else {
-            Err(iface_error(err_code))
+            Err(DeviceError(err_code))
         }
     }
 
@@ -140,11 +247,20 @@ impl Device {
 impl Drop for Device {
     fn drop(&mut self) {
         // Also drops all open interfaces.
-        unsafe { xwiimote_sys::iface_unref(self.0) };
+        unsafe { xwiimote_sys::iface_unref(self.handle) };
+    }
+}
+
+impl Iterator for Device {
+    type Item = ();
+
+    fn next(&mut self) -> Option<Self::Item> {
+        todo!()
     }
 }
 
 /// The Wii Remote LED lights.
+#[derive(Copy, Clone, Debug)]
 pub enum Led {
     /// The left-most light.
     One = 1,
@@ -154,17 +270,6 @@ pub enum Led {
     Three,
     /// The right-most light.
     Four,
-}
-
-impl Led {
-    fn raw(self) -> raw::c_uint {
-        self as u32
-    }
-}
-
-fn iface_error(_code: raw::c_int) -> io::Error {
-    // todo: see if library actually populates `errno`.
-    io::Error::last_os_error()
 }
 
 /*fn to_raw_str<T: AsRef<str>>(str: T) -> *const raw::c_char {
