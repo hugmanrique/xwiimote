@@ -74,8 +74,25 @@ bitflags! {
     }
 }
 
+/// Motion Plus sensor normalization and calibration values.
+///
+/// The absolute offsets are subtracted from any Motion Plus
+/// sensor data before they are returned in an event.
+#[derive(Copy, Clone, Eq, PartialEq, Default, Debug)]
+struct MotionPlusNormalization {
+    /// Absolute x-axis offset.
+    x: i32,
+    /// Absolute y-axis offset.
+    y: i32,
+    /// Absolute z-axis offset
+    z: i32,
+    /// Calibration factor used to establish the zero-point of
+    /// the Motion Plus sensor data depending on its output.
+    factor: i32,
+}
+
 /// Describes the communication with a device.
-struct Device {
+pub struct Device {
     handle: *mut iface,
     // Have we opened the core channel in writable mode?
     // We need to keep track of this because some operations
@@ -237,11 +254,40 @@ impl Device {
         if err_code == 0 {
             Ok(())
         } else {
+            // The channel might have been closed by the kernel.
             Err(DeviceError(err_code))
         }
     }
 
-    // todo: MP normalization
+    // Motion Plus sensor normalization
+
+    /// Reads the Motion Plus sensor normalization values.
+    fn mp_normalization(&self) -> MotionPlusNormalization {
+        let mut values = MotionPlusNormalization::default();
+        unsafe {
+            xwiimote_sys::iface_get_mp_normalization(
+                self.handle,
+                &mut values.x,
+                &mut values.y,
+                &mut values.z,
+                &mut values.factor,
+            )
+        };
+        values
+    }
+
+    /// Sets the Motion Plus sensor normalization values.
+    fn set_mp_normalization(&mut self, values: &MotionPlusNormalization) {
+        unsafe {
+            xwiimote_sys::iface_set_mp_normalization(
+                self.handle,
+                values.x,
+                values.y,
+                values.z,
+                values.factor,
+            )
+        };
+    }
 }
 
 impl Drop for Device {
