@@ -2,7 +2,8 @@ use std::ffi::CStr;
 use std::os::raw;
 
 pub mod device;
-mod event;
+pub mod event;
+pub mod key;
 pub mod monitor;
 
 // todo: document that device monitoring requires libudev

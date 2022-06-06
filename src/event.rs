@@ -1,106 +1,12 @@
+use crate::key;
+use crate::key::KeyState;
 use std::time::Instant;
-
-macro_rules! key_enum {
-    ($name:ident {$($vals:tt)*}) => {
-        pub enum $name {
-            /// Left directional pad button.
-            Left,
-            /// Right directional pad button.
-            Right,
-            /// Up directional pad button.
-            Up,
-            /// Down directional pad button.
-            Down,
-            /// A button.
-            A,
-            /// B button.
-            B,
-            /// Plus (+) button.
-            Plus,
-            /// Minus (-) button.
-            Minus,
-            /// Home button.
-            Home,
-            $($vals)*
-        }
-    };
-}
-
-key_enum!(Key {
-    /// 1 button.
-    One,
-    /// 2 button.
-    Two,
-});
-
-// wiimote: LEFT, RIGHT, UP, DOWN, PLUS, MINUS, HOME,       A, B,                                ONE, TWO
-// pro    : LEFT, RIGHT, UP, DOWN, PLUS, MINUS, HOME, X, Y, A, B, TR, TL, ZR, ZL, THUMBL, THUMBR
-// classic: LEFT, RIGHT, UP, DOWN, PLUS, MINUS, HOME, X, Y, A, B, TR, TL, ZR, ZL
-// nunchuk:                                                                                               C, Z
-// drums  :                        PLUS, MINUS
-// guitar :                        PLUS,        HOME,
-// In total, 21 buttons
-
-key_enum!(ProControllerKey {});
-
-pub enum OtherKey {
-    // Wiimote // todo: note that the power button is not reported
-
-    // Classic (also includes the above), Nunchuk, Wii-U Pro and others.
-    /// Joystick X-axis.
-    X,
-    /// Joystick Y-axis.
-    Y,
-    /// Left trigger range.
-    LeftTrigger,
-    /// Right trigger range.
-    RightTrigger,
-    /// ZL button.
-    ZL,
-    /// ZR button.
-    ZR,
-    /// Left thumb button.
-    ///
-    /// Reported if the left analog stick is pressed.
-    LeftThumb,
-    /// Right thumb button.
-    ///
-    /// Reported if the right analog stick is pressed.
-    RightThumb,
-    /// Extra C button (e.g. in the Nunchuk).
-    C,
-    /// Extra Z button (e.g. in the Nunchuk).
-    Z,
-    // Guitar Hero guitars
-    // todo: can we clean up strum bar events and have a single key?
-    // todo: improve strum docs.
-    /// The guitar strum bar was moved up.
-    StrumBarUp,
-    /// The guitar strum bar was moved down.
-    StrumBarDown,
-    /// The guitar upper-most fret button.
-    HighestFretBar,
-    /// The guitar second-upper fret button.
-    HighFretBar,
-    /// The guitar mid fret button.
-    MidFretBar,
-    /// The guitar second-lowest fret button.
-    LowFretBar,
-    /// The guitar lowest fret button.
-    LowestFretBar,
-}
-
-pub enum KeyState {
-    Up = 0,
-    Down,
-    AutoRepeat,
-}
 
 pub enum EventKind {
     /// The state of a Wii Remote controller key changed.
     ///
     /// Received only if `Channels::CORE` is open.
-    Key(Key, KeyState),
+    Key(key::Key, KeyState),
     /// Provides the accelerometer data.
     ///
     /// Received only if `Channels::ACCELEROMETER` is open.
@@ -129,56 +35,111 @@ pub enum EventKind {
     /// Provides the Motion Plus extension gyroscope data.
     ///
     /// Received only if `Channels::MOTION_PLUS` is open.
-    MotionPlus {},
+    MotionPlus {
+        /// The x-axis rotational speed.
+        x: i32,
+        /// The y-axis rotational speed.
+        y: i32,
+        /// The z-axis rotational speed.
+        z: i32,
+    },
     /// The state of a Wii U Pro controller key changed.
     ///
     /// Received only if `Channels::PRO_CONTROLLER` is open.
-    ProControllerKey {},
+    ProControllerKey(key::ProControllerKey, KeyState),
     /// Reports the movement of an analog stick from
     /// a Wii U Pro controller.
     ///
     /// Received only if `Channels::PRO_CONTROLLER` is open.
-    ProControllerMove {},
+    ProControllerMove {
+        /// The left analog stick absolute x-axis position.
+        left_x: i32,
+        /// The left analog stick absolute y-axis position.
+        left_y: i32,
+        /// The right analog stick absolute x-axis position.
+        right_x: i32,
+        /// The right analog stick absolute y-axis position.
+        right_y: i32,
+    },
     // todo: document
     Watch {}, // todo: rename to connect/disconnect
     /// The state of a Classic controller key changed.
     ///
     /// Received only if `Channels::CLASSIC_CONTROLLER` is open.
-    ClassicControllerKey {},
+    ClassicControllerKey(key::ClassicControllerKey, KeyState),
     /// Reports the movement of an analog stick from
     /// a Classic controller.
     ///
     /// Received only if `Channels::CLASSIC_CONTROLLER` is open.
-    ClassicControllerMove {},
+    ClassicControllerMove {
+        /// The left analog stick x-axis absolute position.
+        left_x: i32,
+        /// The left analog stick y-axis absolute position.
+        left_y: i32,
+        /// The right analog stick x-axis absolute position.
+        right_x: i32,
+        /// The right analog stick y-axis absolute position.
+        right_y: i32,
+        /// The TL trigger absolute position, ranging from 0 to 63.
+        ///
+        /// Many controller do not have analog controllers, in
+        /// which case this value is either 0 or 63.
+        left_trigger: u8,
+        /// The TR trigger absolute position, ranging from 0 to 63.
+        ///
+        /// Many controller do not have analog controllers, in
+        /// which case this value is either 0 or 63.
+        right_trigger: u8,
+    },
     /// The state of a Nunchuk key changed.
     ///
     /// Received only if `Channels::NUNCHUK` is open.
-    NunchukKey {},
+    NunchukKey(key::NunchukKey, KeyState),
     /// Reports the movement of an analog stick from a Nunchuk.
     ///
     /// Received only if `Channels::NUNCHUK` is open.
-    NunchukMove {},
+    NunchukMove {
+        /// The x-axis absolute position.
+        x: i32,
+        /// The y-axis absolute position.
+        y: i32,
+        /// The x-axis acceleration.
+        x_acceleration: i32,
+        /// The y-axis acceleration.
+        y_acceleration: i32,
+    },
     /// The state of a drums controller key changed.
     ///
     /// Received only if `Channels::DRUMS` is open.
-    DrumsKey {},
+    DrumsKey(key::DrumsKey, KeyState),
     /// Reports the movement of an analog stick from a
     /// drums controller.
     ///
     /// Received only if `Channels::DRUMS` is open.
+    // todo: figure out how many drums, and how to report pressure.
     DrumsMove {},
     /// The state of a guitar controller key changed.
     ///
     /// Received only if `Channels::GUITAR` is open.
-    GuitarKey {},
-    /// Reports the movement of an analog stick from a
-    /// guitar controller.
+    GuitarKey(key::GuitarKey, KeyState),
+    /// Reports the movement of an analog stick, the whammy bar,
+    /// or the fret bar from a guitar controller.
     ///
     /// Received only if `Channels::GUITAR` is open.
-    GuitarMove {},
+    GuitarMove {
+        /// The x-axis analog stick position.
+        x: i32,
+        /// The y-axis analog stick position.
+        y: i32,
+        /// The whammy bar position.
+        whammy_bar: i32,
+        /// The fret bar absolute position.
+        fret_bar: i32,
+    },
     /// The device was removed.
     ///
     /// Received only if watch mode was enabled via `Device::watch`.
+    // todo, can we close the iterator instead?
     Removed,
 }
 
