@@ -5,10 +5,4 @@
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
-impl iface {
-    pub fn new() -> Self {
-        Self { _unused: [] }
-    }
-}
-
 // todo: add tests

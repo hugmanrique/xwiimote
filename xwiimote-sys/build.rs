@@ -44,6 +44,7 @@ fn main() {
         .allowlist_function("xwii_.*")
         .allowlist_var("XWII_.*")
         .size_t_is_usize(true)
+        .derive_default(true)
         .prepend_enum_name(false)
         .parse_callbacks(Box::new(ParseCallbacks {}))
         .generate()

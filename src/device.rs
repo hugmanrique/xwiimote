@@ -1,3 +1,4 @@
+use crate::event::Event;
 use crate::to_owned_str;
 use bitflags::bitflags;
 use std::error::Error;
@@ -6,7 +7,6 @@ use std::os::raw;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::{fmt, ptr};
-use xwiimote_sys::iface;
 
 #[derive(Debug, Clone)]
 pub struct DeviceError(i32);
@@ -93,7 +93,7 @@ pub struct MotionPlusNormalization {
 
 /// Describes the communication with a device.
 pub struct Device {
-    handle: *mut iface,
+    handle: *mut xwiimote_sys::iface,
     // Have we opened the core channel in writable mode?
     // We need to keep track of this because some operations
     // like `rumble(bool)` require this channel.
@@ -176,6 +176,8 @@ impl Device {
             Err(DeviceError(err_code))
         }
     }
+
+    pub fn events(&mut self) -> impl Iterator<Item = Event> {}
 
     // Actions on "main" channel (it isn't a channel per se)
 
@@ -295,14 +297,6 @@ impl Drop for Device {
     fn drop(&mut self) {
         // Also drops all open interfaces.
         unsafe { xwiimote_sys::iface_unref(self.handle) };
-    }
-}
-
-impl Iterator for Device {
-    type Item = ();
-
-    fn next(&mut self) -> Option<Self::Item> {
-        todo!()
     }
 }
 

@@ -147,3 +147,27 @@ pub struct Event {
     pub time: Instant,
     pub kind: EventKind,
 }
+
+pub(crate) struct EventStream {
+    handle: *mut xwiimote_sys::iface,
+    raw_event: xwiimote_sys::event,
+}
+
+impl EventStream {
+    // todo: document that the caller is responsible for opening
+    //       the channels.
+    pub fn new(handle: *mut xwiimote_sys::iface) -> Self {
+        Self {
+            handle,
+            raw_event: xwiimote_sys::event::default(),
+        }
+    }
+}
+
+impl Iterator for EventStream {
+    type Item = Event;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        todo!()
+    }
+}
