@@ -1,3 +1,5 @@
+use num_derive::FromPrimitive;
+
 // We provide a key enumeration for each controller and
 // extension type. To avoid repetition, we use a macro to define
 // the common key variants. A matrix of the buttons reported by each
@@ -15,11 +17,12 @@ macro_rules! key_enum {
     };
     // There are no more variants, emit the enum definition.
     ($name:ident {$($body:tt)*}) => {
+        #[derive(Copy, Clone, Debug, FromPrimitive)]
         pub enum $name {
             /// Plus (+) button.
-            Plus,
+            Plus = 6,
             /// Minus (-) button.
-            Minus,
+            Minus = 7,
             $($body)*
         }
     };
@@ -30,19 +33,19 @@ macro_rules! regular_controller_key_enum {
         key_enum!{
             $name {
                 /// Left directional pad button.
-                Left,
+                Left = 0,
                 /// Right directional pad button.
-                Right,
+                Right = 1,
                 /// Up directional pad button.
-                Up,
+                Up = 2,
                 /// Down directional pad button.
-                Down,
+                Down = 3,
                 /// A button.
-                A,
+                A = 4,
                 /// B button.
-                B,
+                B = 5,
                 /// Home button.
-                Home,
+                Home = 8,
                 $($body)*
             }
         }
@@ -54,17 +57,17 @@ macro_rules! gamepad_key_enum {
         regular_controller_key_enum!{
             $name {
                 /// Joystick X-axis.
-                X,
+                X = 11,
                 /// Joystick Y-axis.
-                Y,
+                Y = 12,
                 /// TL button.
-                TL,
+                TL = 13,
                 /// TR button.
-                TR,
+                TR = 14,
                 /// ZL button.
-                ZL,
+                ZL = 15,
                 /// ZR button.
-                ZR,
+                ZR = 16,
                 $($body)*
             }
         }
@@ -73,50 +76,53 @@ macro_rules! gamepad_key_enum {
 
 regular_controller_key_enum!(Key {
     /// 1 button.
-    One,
+    One = 9,
     /// 2 button.
-    Two
+    Two = 10
 });
 
 gamepad_key_enum!(ProControllerKey {
     /// Left thumb button.
     ///
     /// Reported if the left analog stick is pressed.
-    LeftThumb,
+    LeftThumb = 17,
     /// Right thumb button.
     ///
     /// Reported if the right analog stick is pressed.
-    RightThumb,
+    RightThumb = 18,
 });
 
 gamepad_key_enum!(ClassicControllerKey {});
 
+// This is the only extension that doesn't have the + and - buttons.
+#[derive(Copy, Clone, Debug, FromPrimitive)]
 pub enum NunchukKey {
     /// C button.
-    C,
+    C = 19,
     /// Z button.
-    Z,
+    Z = 20,
 }
 
 key_enum!(DrumsKey {});
 
 key_enum!(GuitarKey {
     /// The StarPower/Home button.
-    StarPower,
+    StarPower = 8, // same as Key::Home
     /// The guitar strum bar.
-    StrumBar,
+    StrumBar = 21, // also 22
     /// The guitar upper-most fret button.
-    HighestFretBar,
+    HighestFretBar = 23,
     /// The guitar second-upper fret button.
-    HighFretBar,
+    HighFretBar = 24,
     /// The guitar mid fret button.
-    MidFretBar,
+    MidFretBar = 25,
     /// The guitar second-lowest fret button.
-    LowFretBar,
+    LowFretBar = 26,
     /// The guitar lowest fret button.
-    LowestFretBar,
+    LowestFretBar = 27,
 });
 
+#[derive(Copy, Clone, Debug, FromPrimitive)]
 pub enum KeyState {
     Up = 0,
     Down,

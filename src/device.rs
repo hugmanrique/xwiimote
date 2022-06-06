@@ -1,4 +1,4 @@
-use crate::event::Event;
+use crate::event::EventStream;
 use crate::to_owned_str;
 use bitflags::bitflags;
 use std::error::Error;
@@ -6,10 +6,10 @@ use std::fmt::Formatter;
 use std::os::raw;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::{fmt, ptr};
+use std::{fmt, io, ptr};
 
 #[derive(Debug, Clone)]
-pub struct DeviceError(i32);
+pub struct DeviceError(pub(crate) i32);
 
 impl fmt::Display for DeviceError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -19,7 +19,13 @@ impl fmt::Display for DeviceError {
 
 impl Error for DeviceError {}
 
-type DeviceResult<T> = Result<T, DeviceError>;
+impl From<io::Error> for DeviceError {
+    fn from(err: io::Error) -> Self {
+        DeviceError(err.raw_os_error().unwrap_or(-1))
+    }
+}
+
+pub type DeviceResult<T> = Result<T, DeviceError>;
 
 /// A Wii Remote device address.
 #[derive(Clone, Debug)]
@@ -177,7 +183,9 @@ impl Device {
         }
     }
 
-    pub fn events(&mut self) -> impl Iterator<Item = Event> {}
+    pub fn events(&mut self) -> DeviceResult<EventStream> {
+        EventStream::open(self.handle)
+    }
 
     // Actions on "main" channel (it isn't a channel per se)
 
