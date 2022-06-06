@@ -9,5 +9,5 @@ Idiomatic Rust bindings to the [xwiimote](https://github.com/dvdhrm/xwiimote) us
 ## Progress
 - [x] Device monitoring
 - [x] Device non-interface methods
-- [ ] Interfaces
+- [x] Interfaces
 - [ ] Events

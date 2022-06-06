@@ -79,16 +79,16 @@ bitflags! {
 /// The absolute offsets are subtracted from any Motion Plus
 /// sensor data before they are returned in an event.
 #[derive(Copy, Clone, Eq, PartialEq, Default, Debug)]
-struct MotionPlusNormalization {
+pub struct MotionPlusNormalization {
     /// Absolute x-axis offset.
-    x: i32,
+    pub x: i32,
     /// Absolute y-axis offset.
-    y: i32,
+    pub y: i32,
     /// Absolute z-axis offset
-    z: i32,
+    pub z: i32,
     /// Calibration factor used to establish the zero-point of
     /// the Motion Plus sensor data depending on its output.
-    factor: i32,
+    pub factor: i32,
 }
 
 /// Describes the communication with a device.
@@ -119,6 +119,7 @@ impl Device {
 
     // Channels (these are called interfaces in xwiimote)
 
+    // todo: document that opening a channel gives access to more event kinds.
     /// Opens the given channels on the device.
     ///
     /// If a given channel is already open, it is ignored. If any channel
@@ -128,7 +129,7 @@ impl Device {
     /// A channel may be closed automatically if the e.g. an extension
     /// is unplugged or on error conditions.
     // todo: return the channels that failed.
-    // todo: document that an event is emitted if a channel is closed.
+    // todo: document that an event is emitted when a channel is closed.
     pub fn open(&mut self, channels: Channels, writable: bool) -> DeviceResult<()> {
         let interfaces = channels.bits | (writable as raw::c_uint) << 16;
         let err_code = unsafe { xwiimote_sys::iface_open(self.handle, interfaces) };
@@ -262,7 +263,7 @@ impl Device {
     // Motion Plus sensor normalization
 
     /// Reads the Motion Plus sensor normalization values.
-    fn mp_normalization(&self) -> MotionPlusNormalization {
+    pub fn mp_normalization(&self) -> MotionPlusNormalization {
         let mut values = MotionPlusNormalization::default();
         unsafe {
             xwiimote_sys::iface_get_mp_normalization(
@@ -277,7 +278,7 @@ impl Device {
     }
 
     /// Sets the Motion Plus sensor normalization values.
-    fn set_mp_normalization(&mut self, values: &MotionPlusNormalization) {
+    pub fn set_mp_normalization(&mut self, values: &MotionPlusNormalization) {
         unsafe {
             xwiimote_sys::iface_set_mp_normalization(
                 self.handle,
@@ -317,7 +318,3 @@ pub enum Led {
     /// The right-most light.
     Four,
 }
-
-/*fn to_raw_str<T: AsRef<str>>(str: T) -> *const raw::c_char {
-
-}*/
