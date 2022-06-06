@@ -37,6 +37,8 @@ fn main() {
 
     // Invalidate the built crate whenever the wrapper changes
     println!("cargo:rerun-if-changed=wrapper.h");
+    println!("cargo:rerun-if-changed=xwiimote/lib/core.c");
+    println!("cargo:rerun-if-changed=xwiimote/lib/monitor.c");
 
     let bindings = bindgen::Builder::default()
         .header("wrapper.h")
@@ -58,6 +60,11 @@ fn main() {
     cc::Build::new()
         .file("xwiimote/lib/core.c")
         .file("xwiimote/lib/monitor.c")
+        // The non-used enum-array entries are initialized to -1 using
+        // the designated initializer [0 ... MAX] = -1, which causes a
+        // double initialization when the entry of each enum variant is
+        // initialized. This is mostly harmless, so we ignore it.
+        .flag("-Wno-override-init")
         .define("XWII__EXPORT", r#"__attribute__((visibility("default")))"#)
         .compile("xwiimote");
 }
