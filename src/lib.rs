@@ -1,3 +1,17 @@
+//! This library provides a Rust interface to the [xwiimote] user-space
+//! library.
+//!
+//! The following functionality is provided:
+//! - [Device discovery](monitor)
+//! - [Device connection](device)
+//!     - Querying of device kind, connected extension, LED lights,
+//!       battery level, rumble motor, etc.
+//!     - Open, close and detect available [interfaces](device::Channels).
+//!     - Efficient [event dispatching](event) through `epoll`.
+//!
+//! # Examples
+//! [xwiimote]: https://github.com/dvdhrm/xwiimote
+
 use std::ffi::CStr;
 use std::os::raw;
 
