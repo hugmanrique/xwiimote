@@ -14,6 +14,7 @@ const MAX_IR_SOURCES: usize = 4;
 
 /// An IR source detected by the IR camera, as reported
 /// in [`EventKind::Ir`].
+#[derive(Copy, Clone, Debug)]
 pub struct IrSource {
     /// The x-axis position.
     pub x: i32,
@@ -37,6 +38,7 @@ impl IrSource {
 
 /// The type of an [`Event`], including its associated data.
 #[non_exhaustive]
+#[derive(Copy, Clone, Debug)]
 pub enum EventKind {
     /// The state of a Wii Remote controller key changed.
     ///
@@ -177,6 +179,7 @@ pub enum EventKind {
 }
 
 /// An event received from an open channel to a [`Device`].
+#[derive(Copy, Clone, Debug)]
 pub struct Event {
     /// The time at which the kernel generated the event.
     pub time: Timestamp,

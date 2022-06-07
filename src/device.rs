@@ -107,10 +107,10 @@ pub struct MotionPlusNormalization {
 /// use xwiimote::device::{Device, Channels};
 ///
 /// let path = Path::new("/sys/bus/hid/devices/*dev*");
-/// let device = Device::new(path)?;
+/// let mut device = Device::new(path)?;
 /// device.open(Channels::CORE, false)?;
 ///
-/// let event_stream = device.events();
+/// let mut event_stream = device.events();
 /// while let Some(event) = event_stream.next()? {
 ///     // Work with event
 /// }
