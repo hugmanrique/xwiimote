@@ -36,9 +36,9 @@ impl From<PathBuf> for Address {
     ///
     /// If the file at the path exists, it should represent the root
     /// node of a Wii Remote device. Otherwise, calling
-    /// `Device::new(Address)` will fail.
+    /// [`Device::new(Address)`] will fail.
     fn from(path: PathBuf) -> Self {
-        Self(path.clone())
+        Self(path)
     }
 }
 
@@ -47,14 +47,14 @@ impl From<&Path> for Address {
     ///
     /// If the file at the path exists, it should represent the root
     /// node of a Wii Remote device. Otherwise, calling
-    /// `Device::new(Address)` will fail.
+    /// [`Device::new(Address)`] will fail.
     fn from(path: &Path) -> Self {
         Self(path.to_path_buf())
     }
 }
 
 bitflags! {
-    /// Represents the channels that can be opened on a `Device`.
+    /// Represents the channels that can be opened on a [`Device`].
     pub struct Channels: raw::c_uint {
         // todo: improve docs
         /// Primary channel.
@@ -98,6 +98,23 @@ pub struct MotionPlusNormalization {
 }
 
 /// Describes the communication with a device.
+///
+/// # Examples
+/// An application can listen for events by creating a device,
+/// opening the required channels for communication, and finally
+/// requesting events from the stream returned by [`Self::events()`].
+/// ```ignore
+/// use xwiimote::device::{Device, Channels};
+///
+/// let path = Path::new("/sys/bus/hid/devices/*dev*");
+/// let device = Device::new(path)?;
+/// device.open(Channels::CORE, false)?;
+///
+/// let event_stream = device.events();
+/// while let Some(event) = event_stream.next()? {
+///     // Work with event
+/// }
+/// ```
 pub struct Device {
     handle: *mut xwiimote_sys::iface,
     // Have we opened the core channel in writable mode?
@@ -134,7 +151,6 @@ impl Device {
     ///
     /// A channel may be closed automatically if the e.g. an extension
     /// is unplugged or on error conditions.
-    // todo: return the channels that failed.
     // todo: document that an event is emitted when a channel is closed.
     pub fn open(&mut self, channels: Channels, writable: bool) -> DeviceResult<()> {
         let interfaces = channels.bits | (writable as raw::c_uint) << 16;
@@ -183,6 +199,11 @@ impl Device {
         }
     }
 
+    /// Returns an iterator that yields events received from the
+    /// device.
+    ///
+    /// Most event types are received only if the appropriate
+    /// channels are open. See [`crate::event::EventKind`] for more.
     pub fn events(&mut self) -> DeviceResult<EventStream> {
         EventStream::open(self.handle)
     }

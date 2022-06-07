@@ -1,7 +1,10 @@
+#[cfg(doc)]
+use crate::device::{Channels, Device};
 use crate::device::{DeviceError, DeviceResult};
 use crate::key;
 use crate::key::KeyState;
 use epoll_rs::{Epoll, Opts};
+use fallible_iterator::FallibleIterator;
 use num_traits::FromPrimitive;
 use std::fs::File;
 use std::mem;
@@ -10,7 +13,7 @@ use unix_ts::Timestamp;
 const MAX_IR_SOURCES: usize = 4;
 
 /// An IR source detected by the IR camera, as reported
-/// in `EventKind::Ir`.
+/// in [`EventKind::Ir`].
 pub struct IrSource {
     /// The x-axis position.
     pub x: i32,
@@ -32,15 +35,16 @@ impl IrSource {
     }
 }
 
-/// The type of an `Event`, including its associated data.
+/// The type of an [`Event`], including its associated data.
+#[non_exhaustive]
 pub enum EventKind {
     /// The state of a Wii Remote controller key changed.
     ///
-    /// Received only if `Channels::CORE` is open.
+    /// Received only if [`Channels::CORE`] is open.
     Key(key::Key, KeyState),
     /// Provides the accelerometer data.
     ///
-    /// Received only if `Channels::ACCELEROMETER` is open.
+    /// Received only if [`Channels::ACCELEROMETER`] is open.
     Accelerometer {
         /// The x-axis acceleration.
         x: i32,
@@ -55,16 +59,16 @@ pub enum EventKind {
     /// of each source within the array is maintained across
     /// events.
     ///
-    /// Received only if `Channels::IR` is open.
+    /// Received only if [`Channels::IR`] is open.
     Ir([Option<IrSource>; MAX_IR_SOURCES]),
     /// Provides Balance Board weight data. Four sensors report
     /// data for each of the edges of the board.
     ///
-    /// Received only if `Channels::BALANCE_BOARD` is open.
+    /// Received only if [`Channels::BALANCE_BOARD`] is open.
     BalanceBoard([i32; 4]),
     /// Provides the Motion Plus extension gyroscope data.
     ///
-    /// Received only if `Channels::MOTION_PLUS` is open.
+    /// Received only if [`Channels::MOTION_PLUS`] is open.
     MotionPlus {
         /// The x-axis rotational speed.
         x: i32,
@@ -75,12 +79,12 @@ pub enum EventKind {
     },
     /// The state of a Wii U Pro controller key changed.
     ///
-    /// Received only if `Channels::PRO_CONTROLLER` is open.
+    /// Received only if [`Channels::PRO_CONTROLLER`] is open.
     ProControllerKey(key::ProControllerKey, KeyState),
     /// Reports the movement of an analog stick from
     /// a Wii U Pro controller.
     ///
-    /// Received only if `Channels::PRO_CONTROLLER` is open.
+    /// Received only if [`Channels::PRO_CONTROLLER`] is open.
     ProControllerMove {
         /// The left analog stick absolute x-axis position.
         left_x: i32,
@@ -95,16 +99,16 @@ pub enum EventKind {
     /// data that cannot be monitored separately changed.
     ///
     /// No payload is provided, hence the application should check
-    /// what changed by examining the `Device` manually.
+    /// what changed by examining the [`Device`] manually.
     Other,
     /// The state of a Classic controller key changed.
     ///
-    /// Received only if `Channels::CLASSIC_CONTROLLER` is open.
+    /// Received only if [`Channels::CLASSIC_CONTROLLER`] is open.
     ClassicControllerKey(key::ClassicControllerKey, KeyState),
     /// Reports the movement of an analog stick from
     /// a Classic controller.
     ///
-    /// Received only if `Channels::CLASSIC_CONTROLLER` is open.
+    /// Received only if [`Channels::CLASSIC_CONTROLLER`] is open.
     ClassicControllerMove {
         /// The left analog stick x-axis absolute position.
         left_x: i32,
@@ -127,11 +131,11 @@ pub enum EventKind {
     },
     /// The state of a Nunchuk key changed.
     ///
-    /// Received only if `Channels::NUNCHUK` is open.
+    /// Received only if [`Channels::NUNCHUK`] is open.
     NunchukKey(key::NunchukKey, KeyState),
     /// Reports the movement of an analog stick from a Nunchuk.
     ///
-    /// Received only if `Channels::NUNCHUK` is open.
+    /// Received only if [`Channels::NUNCHUK`] is open.
     NunchukMove {
         /// The x-axis absolute position.
         x: i32,
@@ -144,22 +148,22 @@ pub enum EventKind {
     },
     /// The state of a drums controller key changed.
     ///
-    /// Received only if `Channels::DRUMS` is open.
+    /// Received only if [`Channels::DRUMS`] is open.
     DrumsKey(key::DrumsKey, KeyState),
     /// Reports the movement of an analog stick from a
     /// drums controller.
     ///
-    /// Received only if `Channels::DRUMS` is open.
+    /// Received only if [`Channels::DRUMS`] is open.
     // todo: figure out how many drums, and how to report pressure.
     DrumsMove {},
     /// The state of a guitar controller key changed.
     ///
-    /// Received only if `Channels::GUITAR` is open.
+    /// Received only if [`Channels::GUITAR`] is open.
     GuitarKey(key::GuitarKey, KeyState),
     /// Reports the movement of an analog stick, the whammy bar,
     /// or the fret bar from a guitar controller.
     ///
-    /// Received only if `Channels::GUITAR` is open.
+    /// Received only if [`Channels::GUITAR`] is open.
     GuitarMove {
         /// The x-axis analog stick position.
         x: i32,
@@ -172,7 +176,7 @@ pub enum EventKind {
     },
 }
 
-/// An event received from an open channel to a `Device`.
+/// An event received from an open channel to a [`Device`].
 pub struct Event {
     /// The time at which the kernel generated the event.
     pub time: Timestamp,
@@ -185,7 +189,7 @@ impl Event {
     ///
     /// # Safety
     /// Assumes that `raw` contains a valid event, as
-    /// returned by `xwiimote_sys::event_dispatch`.
+    /// returned by [`xwiimote_sys::event_dispatch`].
     unsafe fn parse(raw: &xwiimote_sys::event) -> Self {
         let time = Timestamp::new(raw.time.tv_sec, raw.time.tv_usec as u32 * 1000);
         let kind = match raw.type_ {
@@ -280,10 +284,11 @@ impl Event {
     }
 }
 
-/// Watches for events on the file descriptor used by a `Device`.
+/// Watches for events on the file descriptor used by a [`Device`].
 ///
-/// The kinds of events returned by `next()` depend on the open
-/// channels with the device.
+/// The kinds of events returned by [`Self::next()`] depend on the open
+/// channels with the device. See each [`EventKind`] variant for the
+/// required channels to receive events of a certain type.
 pub struct EventStream {
     handle: *mut xwiimote_sys::iface,
     epoll: Epoll,
@@ -303,8 +308,13 @@ impl EventStream {
             last_event: Default::default(),
         })
     }
+}
 
-    pub fn next(&mut self) -> DeviceResult<Option<Event>> {
+impl FallibleIterator for EventStream {
+    type Item = Event;
+    type Error = DeviceError;
+
+    fn next(&mut self) -> Result<Option<Self::Item>, Self::Error> {
         loop {
             let ep_event = self.epoll.wait_one()?;
             return match ep_event.events {
