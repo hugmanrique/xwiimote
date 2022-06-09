@@ -16,6 +16,7 @@ use crate::event::EventStream;
 use crate::io_blocker::IoBlocker;
 use bitflags::bitflags;
 use futures::Stream;
+use num_derive::FromPrimitive;
 
 use std::ffi::{CStr, CString};
 use std::os::unix::ffi::OsStrExt;
@@ -224,7 +225,7 @@ pub struct MotionPlusNormalization {
 }
 
 /// The Wii Remote LED lights.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, FromPrimitive)]
 pub enum Led {
     /// The left-most light.
     One = 1,
@@ -250,7 +251,11 @@ impl Device {
     pub fn connect(address: &Address) -> Result<Self> {
         let mut handle = ptr::null_mut();
         let path = CString::new(address.0.as_os_str().as_bytes()).unwrap();
-        thread::sleep(Duration::from_millis(500));
+
+        // Opening the device file immediately after being discovered
+        // results in a "Transport is not connected" error. This delays
+        // the operation, but isn't ideal (the delay is arbitrary).
+        thread::sleep(Duration::from_millis(100));
 
         let res_code = unsafe { xwiimote_sys::iface_new(&mut handle, path.as_ptr()) };
         bail_if!(res_code != 0);
