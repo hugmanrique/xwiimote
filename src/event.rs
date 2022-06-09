@@ -510,7 +510,7 @@ impl Stream for EventStream<'_> {
                 if self.last_event.type_ == xwiimote_sys::EVENT_GONE {
                     // We were watching for hot-plug events, and the device
                     // was closed. No more events are coming.
-                    self.remove_interest().err().map(|why| Err(why))
+                    self.remove_interest().err().map(Err)
                 } else {
                     let event = unsafe { Event::parse(&self.last_event) };
                     Some(Ok(event))
