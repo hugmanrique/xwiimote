@@ -5,9 +5,3 @@
 [![Build status](https://github.com/hugmanrique/xwiimote/actions/workflows/build.yml/badge.svg)](https://github.com/hugmanrique/xwiimote/actions/)
 
 Idiomatic Rust bindings to the [xwiimote](https://github.com/dvdhrm/xwiimote) user-space library.
-
-## Progress
-- [x] Device monitoring
-- [x] Device non-interface methods
-- [x] Interfaces
-- [ ] Events
