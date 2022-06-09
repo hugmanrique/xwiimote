@@ -1,19 +1,168 @@
 #[cfg(doc)]
-use crate::device::{Channels, Device};
-use crate::device::{DeviceError, DeviceResult};
-use crate::key;
-use crate::key::KeyState;
-use epoll_rs::{Epoll, Opts};
-use fallible_iterator::FallibleIterator;
+use crate::Channels;
+use crate::IoBlocker;
+use crate::{Device, Result};
+use futures::Stream;
+use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
-use std::fs::File;
-use std::mem;
-use unix_ts::Timestamp;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::time::{Duration, SystemTime};
+use std::{io, mem};
+
+// Keys
+
+// We provide a key enumeration for each controller and extension type.
+// To avoid repetition, we use a macro to define the common key variants.
+// A matrix of the buttons reported by each device is given in `BUTTONS.md`.
+// This macro definition uses the TT munching technique.
+macro_rules! key_enum {
+    ($doc:expr, $name:ident {$($body:tt)*} ($variant:expr) $($tail:tt)*) => {
+        inner_key_enum! {
+            $doc:expr,
+            $name {
+                $($body)*  // Previously-built variants.
+                $variant,
+            }
+        }
+        $($tail)* // Unprocessed variants.
+    };
+    // There are no more variants, emit the enum definition.
+    ($doc:expr, $name:ident {$($body:tt)*}) => {
+        #[derive(Copy, Clone, Debug, FromPrimitive)]
+        #[doc = $doc]
+        pub enum $name {
+            /// Plus (+) button.
+            Plus = 6,
+            /// Minus (-) button.
+            Minus = 7,
+            $($body)*
+        }
+    };
+}
+
+macro_rules! regular_controller_key_enum {
+    ($doc:expr, $name:ident {$($body:tt)*}) => {
+        key_enum!{
+            $doc,
+            $name {
+                /// Left directional pad button.
+                Left = 0,
+                /// Right directional pad button.
+                Right = 1,
+                /// Up directional pad button.
+                Up = 2,
+                /// Down directional pad button.
+                Down = 3,
+                /// A button.
+                A = 4,
+                /// B button.
+                B = 5,
+                /// Home button.
+                Home = 8,
+                $($body)*
+            }
+        }
+    };
+}
+
+macro_rules! gamepad_key_enum {
+    ($doc:expr, $name:ident {$($body:tt)*}) => {
+        regular_controller_key_enum!{
+            $doc,
+            $name {
+                /// Joystick X-axis.
+                X = 11,
+                /// Joystick Y-axis.
+                Y = 12,
+                /// TL button.
+                TL = 13,
+                /// TR button.
+                TR = 14,
+                /// ZL button.
+                ZL = 15,
+                /// ZR button.
+                ZR = 16,
+                $($body)*
+            }
+        }
+    };
+}
+
+regular_controller_key_enum!(
+    "The keys of a Wii Remote",
+    Key {
+        /// 1 button.
+        One = 9,
+        /// 2 button.
+        Two = 10
+    }
+);
+
+gamepad_key_enum!(
+    "The keys of a Wii U Pro controller",
+    ProControllerKey {
+        /// Left thumb button.
+        ///
+        /// Reported if the left analog stick is pressed.
+        LeftThumb = 17,
+        /// Right thumb button.
+        ///
+        /// Reported if the right analog stick is pressed.
+        RightThumb = 18,
+    }
+);
+
+gamepad_key_enum!("The keys of a Classic controller", ClassicControllerKey {});
+
+/// The keys of a Nunchuk.
+// This is the only extension that doesn't have the + and - buttons.
+#[derive(Copy, Clone, Debug, FromPrimitive)]
+pub enum NunchukKey {
+    /// C button.
+    C = 19,
+    /// Z button.
+    Z = 20,
+}
+
+key_enum!("The keys of a drums controller.", DrumsKey {});
+
+key_enum!("The keys of a guitar controller.",
+    GuitarKey {
+        /// The StarPower/Home button.
+        StarPower = 8, // same as Key::Home
+        /// The guitar strum bar.
+        StrumBar = 21, // also 22
+        /// The guitar upper-most fret button.
+        HighestFretBar = 23,
+        /// The guitar second-upper fret button.
+        HighFretBar = 24,
+        /// The guitar mid fret button.
+        MidFretBar = 25,
+        /// The guitar second-lowest fret button.
+        LowFretBar = 26,
+        /// The guitar lowest fret button.
+        LowestFretBar = 27,
+    }
+);
+
+/// The state of a key.
+#[derive(Copy, Clone, Debug, FromPrimitive)]
+pub enum KeyState {
+    /// The key is released.
+    Up = 0,
+    /// The key is held down.
+    Down,
+    /// The key is [held down](`Self::Down`), and was reported as so in
+    /// the previous event for the same key.
+    AutoRepeat,
+}
+
+// Event kinds
 
 const MAX_IR_SOURCES: usize = 4;
 
-/// An IR source detected by the IR camera, as reported
-/// in [`EventKind::Ir`].
+/// An IR source detected by the IR camera, as reported in [`EventKind::Ir`].
 #[derive(Copy, Clone, Debug)]
 pub struct IrSource {
     /// The x-axis position.
@@ -23,7 +172,11 @@ pub struct IrSource {
 }
 
 impl IrSource {
-    unsafe fn from(raw: &xwiimote_sys::event) -> [Option<IrSource>; MAX_IR_SOURCES] {
+    /// Parses the IR source data from the given event.
+    ///
+    /// # Safety
+    /// Assumes `raw` points to an event of type [`xwiimote_sys::EVENT_IR`].
+    unsafe fn parse(raw: &xwiimote_sys::event) -> [Option<IrSource>; MAX_IR_SOURCES] {
         const MISSING_SOURCE: i32 = 1023;
         let mut sources: [Option<_>; MAX_IR_SOURCES] = Default::default();
 
@@ -43,7 +196,7 @@ pub enum EventKind {
     /// The state of a Wii Remote controller key changed.
     ///
     /// Received only if [`Channels::CORE`] is open.
-    Key(key::Key, KeyState),
+    Key(Key, KeyState),
     /// Provides the accelerometer data.
     ///
     /// Received only if [`Channels::ACCELEROMETER`] is open.
@@ -82,7 +235,7 @@ pub enum EventKind {
     /// The state of a Wii U Pro controller key changed.
     ///
     /// Received only if [`Channels::PRO_CONTROLLER`] is open.
-    ProControllerKey(key::ProControllerKey, KeyState),
+    ProControllerKey(ProControllerKey, KeyState),
     /// Reports the movement of an analog stick from
     /// a Wii U Pro controller.
     ///
@@ -106,7 +259,7 @@ pub enum EventKind {
     /// The state of a Classic controller key changed.
     ///
     /// Received only if [`Channels::CLASSIC_CONTROLLER`] is open.
-    ClassicControllerKey(key::ClassicControllerKey, KeyState),
+    ClassicControllerKey(ClassicControllerKey, KeyState),
     /// Reports the movement of an analog stick from
     /// a Classic controller.
     ///
@@ -134,7 +287,7 @@ pub enum EventKind {
     /// The state of a Nunchuk key changed.
     ///
     /// Received only if [`Channels::NUNCHUK`] is open.
-    NunchukKey(key::NunchukKey, KeyState),
+    NunchukKey(NunchukKey, KeyState),
     /// Reports the movement of an analog stick from a Nunchuk.
     ///
     /// Received only if [`Channels::NUNCHUK`] is open.
@@ -151,7 +304,7 @@ pub enum EventKind {
     /// The state of a drums controller key changed.
     ///
     /// Received only if [`Channels::DRUMS`] is open.
-    DrumsKey(key::DrumsKey, KeyState),
+    DrumsKey(DrumsKey, KeyState),
     /// Reports the movement of an analog stick from a
     /// drums controller.
     ///
@@ -161,7 +314,7 @@ pub enum EventKind {
     /// The state of a guitar controller key changed.
     ///
     /// Received only if [`Channels::GUITAR`] is open.
-    GuitarKey(key::GuitarKey, KeyState),
+    GuitarKey(GuitarKey, KeyState),
     /// Reports the movement of an analog stick, the whammy bar,
     /// or the fret bar from a guitar controller.
     ///
@@ -182,19 +335,21 @@ pub enum EventKind {
 #[derive(Copy, Clone, Debug)]
 pub struct Event {
     /// The time at which the kernel generated the event.
-    pub time: Timestamp,
+    pub time: SystemTime,
     /// The event type.
     pub kind: EventKind,
 }
 
 impl Event {
-    /// Parses the given raw event.
+    /// Parses the event.
     ///
     /// # Safety
-    /// Assumes that `raw` contains a valid event, as
-    /// returned by [`xwiimote_sys::event_dispatch`].
+    /// Assumes that `raw` is an object returned by [`xwiimote_sys::event_dispatch`].
     unsafe fn parse(raw: &xwiimote_sys::event) -> Self {
-        let time = Timestamp::new(raw.time.tv_sec, raw.time.tv_usec as u32 * 1000);
+        // Rust does not provide a way to create a `SystemTime` directly.
+        let since_epoch = Duration::new(raw.time.tv_sec as u64, raw.time.tv_usec as u32 * 1000);
+        let time = SystemTime::UNIX_EPOCH + since_epoch;
+
         let kind = match raw.type_ {
             xwiimote_sys::EVENT_KEY => {
                 let (key, state) = Self::parse_key(raw);
@@ -208,7 +363,7 @@ impl Event {
                     z: acc.z,
                 }
             }
-            xwiimote_sys::EVENT_IR => EventKind::Ir(IrSource::from(raw)),
+            xwiimote_sys::EVENT_IR => EventKind::Ir(IrSource::parse(raw)),
             xwiimote_sys::EVENT_BALANCE_BOARD => {
                 let weights = raw.v.abs;
                 EventKind::BalanceBoard([weights[0].x, weights[1].x, weights[2].x, weights[3].x])
@@ -272,82 +427,112 @@ impl Event {
                 let (key, state) = Self::parse_key(raw);
                 EventKind::GuitarKey(key, state)
             }
-            xwiimote_sys::EVENT_GONE => panic!("unexpected removal event"),
+            xwiimote_sys::EVENT_GONE => panic!("unexpected removal event"), // handled by `EventStream`
             type_id => panic!("unexpected event type {}", type_id),
         };
         Event { time, kind }
     }
-    unsafe fn parse_key<T: FromPrimitive>(raw: &xwiimote_sys::event) -> (T, key::KeyState) {
+
+    unsafe fn parse_key<T: FromPrimitive>(raw: &xwiimote_sys::event) -> (T, KeyState) {
         let data = raw.v.key;
-        (
-            T::from_u32(data.code).unwrap_or_else(|| panic!("unknown key code {}", data.code)),
-            key::KeyState::from_u32(data.state)
-                .unwrap_or_else(|| panic!("unknown key state {}", data.state)),
-        )
+        let key =
+            T::from_u32(data.code).unwrap_or_else(|| panic!("unknown key code {}", data.code));
+        let state = KeyState::from_u32(data.state)
+            .unwrap_or_else(|| panic!("unknown key state {}", data.state));
+        (key, state)
     }
 }
 
-/// Watches for events on the file descriptor used by a [`Device`].
+/// Watches for events from a [`Device`].
 ///
-/// The kinds of events returned by [`Self::next()`] depend on the open
-/// channels with the device. See each [`EventKind`] variant for the
-/// required channels to receive events of a certain type.
-pub struct EventStream {
-    handle: *mut xwiimote_sys::iface,
-    epoll: Epoll,
+/// The kinds of streamed events depend on the open channels with
+/// the device. See the description of each [`EventKind`] variant
+/// for the channels needed to receive events of a certain kind.
+pub struct EventStream<'a> {
+    device: &'a Device,
+    // Reuse event across
     last_event: xwiimote_sys::event,
+    // Whether the epoll interest is currently registered. Used to
+    // prevent a double-close when dropping the stream.
+    have_interest: bool,
 }
 
-impl EventStream {
-    pub(crate) fn open(handle: *mut xwiimote_sys::iface) -> DeviceResult<Self> {
-        // We watch the device for read availability to avoid busy-waiting.
-        let dev_fd = unsafe { xwiimote_sys::iface_get_fd(handle) };
-        let epoll = Epoll::new()?;
-        unsafe { epoll.add_raw_fd::<File>(dev_fd, Opts::IN | Opts::HUP | Opts::ERR)? };
+impl<'a> EventStream<'a> {
+    const EPOLL_EVENTS: libc::c_int = libc::EPOLLIN | libc::EPOLLHUP | libc::EPOLLPRI;
+
+    /// Creates a new stream over the events from the device.
+    pub(crate) fn try_new(device: &'a Device) -> Result<Self> {
+        // Watch the device fd for read availability to avoid busy-waiting.
+        let fd = unsafe { xwiimote_sys::iface_get_fd(device.handle) };
+        IoBlocker::get().add_interest(fd, Self::EPOLL_EVENTS)?;
 
         Ok(Self {
-            handle,
-            epoll,
+            device,
             last_event: Default::default(),
+            have_interest: true,
         })
+    }
+
+    /// Removes interest for the [`Device`] file events.
+    fn remove_interest(&mut self) -> Result<()> {
+        if self.have_interest {
+            self.have_interest = false;
+
+            let fd = unsafe { xwiimote_sys::iface_get_fd(self.device.handle) };
+            IoBlocker::get().remove_interest(fd, Self::EPOLL_EVENTS)
+        } else {
+            Ok(())
+        }
     }
 }
 
-impl FallibleIterator for EventStream {
-    type Item = Event;
-    type Error = DeviceError;
+impl Stream for EventStream<'_> {
+    type Item = Result<Event>;
 
-    fn next(&mut self) -> Result<Option<Self::Item>, Self::Error> {
-        loop {
-            let ep_event = self.epoll.wait_one()?;
-            return match ep_event.events {
-                Opts::IN => {
-                    const EAGAIN: i32 = -11; // -libc::EAGAIN
-                    let err_code = unsafe {
-                        xwiimote_sys::iface_dispatch(
-                            self.handle,
-                            &mut self.last_event,
-                            mem::size_of::<xwiimote_sys::event>(),
-                        )
-                    };
-                    match err_code {
-                        0 => {
-                            if self.last_event.type_ == xwiimote_sys::EVENT_GONE {
-                                // We were watching for hot-plug events, and
-                                // the device was closed.
-                                return Ok(None);
-                            }
-
-                            let event = unsafe { Event::parse(&self.last_event) };
-                            Ok(Some(event))
-                        }
-                        EAGAIN => continue, // Poll until readable again
-                        err => Err(DeviceError(err)),
-                    }
-                }
-                Opts::HUP | Opts::ERR => Ok(None),
-                event => panic!("Unexpected epoll event {:?}", event),
-            };
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if !self.have_interest {
+            // We stop reading events once a disconnect event is received.
+            return Poll::Ready(None);
         }
+
+        // Attempt to read a single incoming event.
+        let res_code = unsafe {
+            xwiimote_sys::iface_dispatch(
+                self.device.handle,
+                &mut self.last_event,
+                mem::size_of::<xwiimote_sys::event>(),
+            )
+        };
+
+        const PENDING: libc::c_int = -libc::EAGAIN;
+        let result = match res_code {
+            0 => {
+                if self.last_event.type_ == xwiimote_sys::EVENT_GONE {
+                    // We were watching for hot-plug events, and the device
+                    // was closed. No more events are coming.
+                    self.remove_interest().err().map(|why| Err(why))
+                } else {
+                    let event = unsafe { Event::parse(&self.last_event) };
+                    Some(Ok(event))
+                }
+            }
+            PENDING => {
+                // No event is available, arrange for `wake` to be called once
+                // an event is available.
+                let fd = unsafe { xwiimote_sys::iface_get_fd(self.device.handle) };
+                IoBlocker::get().set_callback(fd, cx.waker().clone());
+                return Poll::Pending;
+            }
+            // Failure, perhaps the device was disconnected.
+            _ => Some(Err(io::Error::last_os_error())),
+        };
+        Poll::Ready(result)
+    }
+}
+
+impl Drop for EventStream<'_> {
+    fn drop(&mut self) {
+        self.remove_interest()
+            .expect("failed to remove interest for device fd");
     }
 }

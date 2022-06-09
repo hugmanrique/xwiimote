@@ -16,9 +16,10 @@ categories = ["api-bindings"]
 
 [dependencies]
 bitflags = "1.3.2"
-epoll-rs = "0.2.1"
-fallible-iterator = "0.2.0"
+futures = "0.3"
+libc = "0.2"
+once_cell = "1.12"
 num-derive = "0.3.3"
 num-traits = "0.2.15"
-unix-ts = "0.4.1"
+signal-hook = "0.3"
 xwiimote-sys = { path = "xwiimote-sys", version = "0.1.4" }
